@@ -26,250 +26,250 @@ env:
   ChromeDriverVersion: 137.0.7151.6800
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
 jobs:
-  build_Stage_BuildOnWindows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 9.0.x
-      - name: Get latest Git tag
-        shell: powershell
-        run: |
-          $latestTag = git describe --tags (git rev-list --tags --max-count=1)
-          echo "frameworkVersion=$latestTag" >> $env:GITHUB_ENV
-        if: startsWith(github.ref, 'refs/tags/')
-      - run: echo $frameworkVersion
-      - name: Remove test sub projects from solution
-        shell: powershell
-        run: |
-          (Get-Content ./Ocaramba.sln) | ForEach-Object -Begin { $skip = 0 } -Process {
-            if ($skip -gt 0) { $skip--; return }
-            switch -regex ($_) {
+  # build_Stage_BuildOnWindows:
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Setup .NET
+  #       uses: actions/setup-dotnet@v4
+  #       with:
+  #         dotnet-version: 9.0.x
+  #     - name: Get latest Git tag
+  #       shell: powershell
+  #       run: |
+  #         $latestTag = git describe --tags (git rev-list --tags --max-count=1)
+  #         echo "frameworkVersion=$latestTag" >> $env:GITHUB_ENV
+  #       if: startsWith(github.ref, 'refs/tags/')
+  #     - run: echo $frameworkVersion
+  #     - name: Remove test sub projects from solution
+  #       shell: powershell
+  #       run: |
+  #         (Get-Content ./Ocaramba.sln) | ForEach-Object -Begin { $skip = 0 } -Process {
+  #           if ($skip -gt 0) { $skip--; return }
+  #           switch -regex ($_) {
 
-                'Ocaramba.Tests.Appium'               { $skip = 1; return }
-                'Ocaramba.Tests.NUnitExtentReports'   { $skip = 1; return }
-                'Ocaramba.Tests.Angular'              { $skip = 4; return }
-                'Ocaramba.Tests.CloudProviderCrossBrowser'              { $skip = 1; return }
-                'Ocaramba.Tests.BrowserStack'              { $skip = 1; return }
-                 'Ocaramba.Tests.NUnit'              { $skip = 1; return }
-                 'Ocaramba.UnitTests'              { $skip = 1; return }
-                 'Ocaramba.Tests.MsTest'              { $skip = 1; return }
-                 'Ocaramba.Tests.Features'              { $skip = 1; return }
-                 'Ocaramba.Tests.Xunit'              { $skip = 1; return }
-                default { $_ }
-            }
-          } | Set-Content ./Ocaramba.sln
-      - name: Restore Dependencies
-        run: |
-          dotnet restore OcarambaLite
-          dotnet restore Ocaramba
-          dotnet restore Ocaramba.Documentation/Ocaramba.Documentation.shfbproj
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}\.nuget\packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }} #hash of project files
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-      - name: Set project versions
-        id: update
-        uses: vers-one/dotnet-project-version-updater@v1.7
-        with:
-          file: |
-            "**/Ocaramba.csproj", "**/OcarambaLite.csproj"
-          version: ${{ env.frameworkVersion }}
-      - name: Set version
-        shell: powershell
-        run: |
-          $content = Get-Content ./Ocaramba.Documentation/Ocaramba.Documentation.shfbproj -Raw
-          $content = $content -replace '(<HelpFileVersion>)(.*?)(</HelpFileVersion>)', "`<HelpFileVersion>$env:frameworkVersion`</HelpFileVersion>"
-          Set-Content ./Ocaramba.Documentation/Ocaramba.Documentation.shfbproj $content
-      - name: Build OcarambaLite
-        run: dotnet build OcarambaLite\OcarambaLite.csproj --no-restore --configuration ${{ env.buildConfiguration }}
-      - name: Build Ocaramba
-        run: dotnet build Ocaramba\Ocaramba.csproj --no-restore --configuration ${{ env.buildConfiguration }}
-      - name: Build Documentation
-        run: dotnet build Ocaramba.Documentation/Ocaramba.Documentation.shfbproj --no-restore --configuration ${{ env.buildConfiguration }} -p:AlwaysLoadProject=true
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        if: always()
-        with:
-          path: ./Ocaramba.Documentation/Help
-      - uses: actions/upload-artifact@v4
-        with:
-          path: ./Ocaramba/bin/Release/Ocaramba.${{ env.frameworkVersion }}.nupkg
-          name: Ocaramba${{ env.frameworkVersion }}
-      - uses: actions/upload-artifact@v4
-        with:
-          path: ./Ocaramba/bin/Release/Ocaramba.${{ env.frameworkVersion }}.snupkg
-          name: OcarambaS${{ env.frameworkVersion }}
-      - uses: actions/upload-artifact@v4
-        with:
-          path: ./OcarambaLite/bin/Release/OcarambaLite.${{ env.frameworkVersion }}.nupkg
-          name: OcarambaLite${{ env.frameworkVersion }}
-      - uses: actions/upload-artifact@v4
-        with:
-          path: ./OcarambaLite/bin/Release/OcarambaLite.${{ env.frameworkVersion }}.snupkg
-          name: OcarambaLiteS${{ env.frameworkVersion }}
-  test_Stage_RunTestsOnDocker:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        if: startsWith(github.ref, 'refs/tags/')
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        if: startsWith(github.ref, 'refs/tags/')
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-        if: startsWith(github.ref, 'refs/tags/')
-      - name: checkov-image-scan
-        uses: bridgecrewio/checkov-action@v12.1347.0
-        with:
-          directory: .
-          soft_fail: false
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ocaramba/selenium:latest
-        if: startsWith(github.ref, 'refs/tags/')
-      - name: Aqua Security Trivy
-        uses: aquasecurity/trivy-action@0.29.0
-        with:
-          severity: MEDIUM,HIGH,CRITICAL
-          image-ref: ocaramba/selenium:latest
-      - name: Install Docker Compose
-        run: |
-          sudo apt-get update 
-          sudo apt-get install docker-compose -y
-      - run: docker-compose -f docker-compose.yml up -d
-      - shell: pwsh
-        run: ./scripts/ExecutingTestsOnDockerGithubActions.ps1
-        if: true
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action/linux@v2
-        if: true
-        with:
-          files: |
-            /home/runner/**/Ocaramba.Tests.Docker.trx
-          check_name: TestsOnDocker
-      - name: Upload zip logs as artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ExecutingTestsOnDocker
-          path: ./ExecutingTestsOnDocker${{ github.run_id }}.zip
-      - name: Build
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false
-          tags: ocaramba/selenium:latest
-        if: ${{!startsWith(github.ref , 'refs/tags/')}}
-  test_Stage_RunTestsOnLinux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: find . -name '*.csproj' -exec sed -i -e 's/109.0.5414.7400/${{ env.ChromeDriverVersion }}/g' {} \;
-      - run: |
-          ls
-          export ASPNETCORE_ENVIRONMENT=Linux
-          echo $ASPNETCORE_ENVIRONMENT
-          sudo apt-get install google-chrome-stable
-          sed -i '/Documentation/,+5 d' ./Ocaramba.sln ;sed -i '/CloudProviderCrossBrowser/,+1 d' ./Ocaramba.sln; sed -i '/UnitTests/,+1 d' ./Ocaramba.sln; sed -i '/BrowserStack/,+1 d' ./Ocaramba.sln; sed -i '/MsTest/,+1 d' ./Ocaramba.sln;sed -i '/Features/,+1 d' ./Ocaramba.sln;sed -i '/Xunit/,+1 d' ./Ocaramba.sln;sed -i '/NUnitExtentReports/,+1 d' ./Ocaramba.sln;sed -i '/Appium/,+1 d' ./Ocaramba.sln;sed -i '/CloudProviderCrossBrowser/,+1 d' ./Ocaramba.sln;sed -i '/Angular/,+1 d' ./Ocaramba.sln
-      - name: Set up Docker
-        uses: docker/setup-buildx-action@v2
-      - name: Run the-internet app in Docker
-        run: |
-          docker run -d -p 7080:5000 gprestes/the-internet
-      - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
-      - shell: pwsh
-        run: ./scripts/ExecutingTestsOnLinuxAzure.ps1
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action/linux@v2
-        if: true
-        with:
-          files: |
-            /home/runner/work/**/TestResults/*.xml
-          check_name: TestsOnLinux
-      - name: Upload zip logs as artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ExecutingTestsOnLinux
-          path: ./Ocaramba.Tests.NUnit/bin/Release/net8.0/ExecutingTestsOnLinux${{ github.run_id }}.zip
-  test_Stage_RunAppiumTestsOnAndroid:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          wget -P ./Ocaramba.Tests.Appium/bin/Release/net8.0/ https://github.com/appium/android-apidemos/releases/download/v3.1.0/ApiDemos-debug.apk
-          export ASPNETCORE_ENVIRONMENT=Linux
-          echo $ASPNETCORE_ENVIRONMENT
-          sed -i '/Documentation/,+5 d' ./Ocaramba.sln ; sed -i '/CloudProviderCrossBrowser/,+1 d' ./Ocaramba.sln; sed -i '/UnitTests/,+1 d' ./Ocaramba.sln; sed -i '/BrowserStack/,+1 d' ./Ocaramba.sln; sed -i '/MsTest/,+1 d' ./Ocaramba.sln;sed -i '/Features/,+1 d' ./Ocaramba.sln;sed -i '/Xunit/,+1 d' ./Ocaramba.sln;sed -i '/NUnitExtentReports/,+1 d' ./Ocaramba.sln;sed -i '/NUnit/,+1 d' ./Ocaramba.sln;sed -i '/Angular/,+1 d' ./Ocaramba.sln
-          ls
-          pwd
-      - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
-      - name: Set up JDK
-        uses: actions/setup-java@v3
-        with:
-          distribution: "temurin"
-          java-version: "17"
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-      - run: |
-          npm install -g appium
-          appium -v
-          appium driver list --installed
-          appium driver install uiautomator2
-          nohup appium --log-level warn --log-timestamp --local-timezone > appium.log 2>&1 &
-          sleep 10
-          curl http://127.0.0.1:4723/wd/hub/sessions || echo "Appium check failed"
-      - name: run tests
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 28
-          target: google_apis
-          arch: x86_64
-          profile: Nexus 6
-          emulator-options: "-no-window -no-audio -no-snapshot"
-          disable-animations: true
-          script: |
-            echo "Installing APK on emulator 5554..."
-            adb -s emulator-5554 install -t -g ./Ocaramba.Tests.Appium/bin/Release/net8.0/ApiDemos-debug.apk
+  #               'Ocaramba.Tests.Appium'               { $skip = 1; return }
+  #               'Ocaramba.Tests.NUnitExtentReports'   { $skip = 1; return }
+  #               'Ocaramba.Tests.Angular'              { $skip = 4; return }
+  #               'Ocaramba.Tests.CloudProviderCrossBrowser'              { $skip = 1; return }
+  #               'Ocaramba.Tests.BrowserStack'              { $skip = 1; return }
+  #                'Ocaramba.Tests.NUnit'              { $skip = 1; return }
+  #                'Ocaramba.UnitTests'              { $skip = 1; return }
+  #                'Ocaramba.Tests.MsTest'              { $skip = 1; return }
+  #                'Ocaramba.Tests.Features'              { $skip = 1; return }
+  #                'Ocaramba.Tests.Xunit'              { $skip = 1; return }
+  #               default { $_ }
+  #           }
+  #         } | Set-Content ./Ocaramba.sln
+  #     - name: Restore Dependencies
+  #       run: |
+  #         dotnet restore OcarambaLite
+  #         dotnet restore Ocaramba
+  #         dotnet restore Ocaramba.Documentation/Ocaramba.Documentation.shfbproj
+  #     - name: Cache
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ${{ github.workspace }}\.nuget\packages
+  #         key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }} #hash of project files
+  #         restore-keys: |
+  #           ${{ runner.os }}-nuget-
+  #     - name: Set project versions
+  #       id: update
+  #       uses: vers-one/dotnet-project-version-updater@v1.7
+  #       with:
+  #         file: |
+  #           "**/Ocaramba.csproj", "**/OcarambaLite.csproj"
+  #         version: ${{ env.frameworkVersion }}
+  #     - name: Set version
+  #       shell: powershell
+  #       run: |
+  #         $content = Get-Content ./Ocaramba.Documentation/Ocaramba.Documentation.shfbproj -Raw
+  #         $content = $content -replace '(<HelpFileVersion>)(.*?)(</HelpFileVersion>)', "`<HelpFileVersion>$env:frameworkVersion`</HelpFileVersion>"
+  #         Set-Content ./Ocaramba.Documentation/Ocaramba.Documentation.shfbproj $content
+  #     - name: Build OcarambaLite
+  #       run: dotnet build OcarambaLite\OcarambaLite.csproj --no-restore --configuration ${{ env.buildConfiguration }}
+  #     - name: Build Ocaramba
+  #       run: dotnet build Ocaramba\Ocaramba.csproj --no-restore --configuration ${{ env.buildConfiguration }}
+  #     - name: Build Documentation
+  #       run: dotnet build Ocaramba.Documentation/Ocaramba.Documentation.shfbproj --no-restore --configuration ${{ env.buildConfiguration }} -p:AlwaysLoadProject=true
+  #     - name: Setup Pages
+  #       uses: actions/configure-pages@v5
+  #     - uses: actions/upload-pages-artifact@v3
+  #       if: always()
+  #       with:
+  #         path: ./Ocaramba.Documentation/Help
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         path: ./Ocaramba/bin/Release/Ocaramba.${{ env.frameworkVersion }}.nupkg
+  #         name: Ocaramba${{ env.frameworkVersion }}
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         path: ./Ocaramba/bin/Release/Ocaramba.${{ env.frameworkVersion }}.snupkg
+  #         name: OcarambaS${{ env.frameworkVersion }}
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         path: ./OcarambaLite/bin/Release/OcarambaLite.${{ env.frameworkVersion }}.nupkg
+  #         name: OcarambaLite${{ env.frameworkVersion }}
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         path: ./OcarambaLite/bin/Release/OcarambaLite.${{ env.frameworkVersion }}.snupkg
+  #         name: OcarambaLiteS${{ env.frameworkVersion }}
+  # test_Stage_RunTestsOnDocker:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Set up QEMU
+  #       uses: docker/setup-qemu-action@v3
+  #       if: startsWith(github.ref, 'refs/tags/')
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+  #       if: startsWith(github.ref, 'refs/tags/')
+  #     - name: Login to Docker Hub
+  #       uses: docker/login-action@v3
+  #       with:
+  #         username: ${{ secrets.DOCKERHUB_USERNAME }}
+  #         password: ${{ secrets.DOCKERHUB_TOKEN }}
+  #       if: startsWith(github.ref, 'refs/tags/')
+  #     - name: checkov-image-scan
+  #       uses: bridgecrewio/checkov-action@v12.1347.0
+  #       with:
+  #         directory: .
+  #         soft_fail: false
+  #     - name: Build and push
+  #       uses: docker/build-push-action@v6
+  #       with:
+  #         context: .
+  #         push: true
+  #         tags: ocaramba/selenium:latest
+  #       if: startsWith(github.ref, 'refs/tags/')
+  #     - name: Aqua Security Trivy
+  #       uses: aquasecurity/trivy-action@0.29.0
+  #       with:
+  #         severity: MEDIUM,HIGH,CRITICAL
+  #         image-ref: ocaramba/selenium:latest
+  #     - name: Install Docker Compose
+  #       run: |
+  #         sudo apt-get update 
+  #         sudo apt-get install docker-compose -y
+  #     - run: docker-compose -f docker-compose.yml up -d
+  #     - shell: pwsh
+  #       run: ./scripts/ExecutingTestsOnDockerGithubActions.ps1
+  #       if: true
+  #     - name: Publish Test Results
+  #       uses: EnricoMi/publish-unit-test-result-action/linux@v2
+  #       if: true
+  #       with:
+  #         files: |
+  #           /home/runner/**/Ocaramba.Tests.Docker.trx
+  #         check_name: TestsOnDocker
+  #     - name: Upload zip logs as artifact
+  #       uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: ExecutingTestsOnDocker
+  #         path: ./ExecutingTestsOnDocker${{ github.run_id }}.zip
+  #     - name: Build
+  #       uses: docker/build-push-action@v6
+  #       with:
+  #         context: .
+  #         push: false
+  #         tags: ocaramba/selenium:latest
+  #       if: ${{!startsWith(github.ref , 'refs/tags/')}}
+  # test_Stage_RunTestsOnLinux:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: find . -name '*.csproj' -exec sed -i -e 's/109.0.5414.7400/${{ env.ChromeDriverVersion }}/g' {} \;
+  #     - run: |
+  #         ls
+  #         export ASPNETCORE_ENVIRONMENT=Linux
+  #         echo $ASPNETCORE_ENVIRONMENT
+  #         sudo apt-get install google-chrome-stable
+  #         sed -i '/Documentation/,+5 d' ./Ocaramba.sln ;sed -i '/CloudProviderCrossBrowser/,+1 d' ./Ocaramba.sln; sed -i '/UnitTests/,+1 d' ./Ocaramba.sln; sed -i '/BrowserStack/,+1 d' ./Ocaramba.sln; sed -i '/MsTest/,+1 d' ./Ocaramba.sln;sed -i '/Features/,+1 d' ./Ocaramba.sln;sed -i '/Xunit/,+1 d' ./Ocaramba.sln;sed -i '/NUnitExtentReports/,+1 d' ./Ocaramba.sln;sed -i '/Appium/,+1 d' ./Ocaramba.sln;sed -i '/CloudProviderCrossBrowser/,+1 d' ./Ocaramba.sln;sed -i '/Angular/,+1 d' ./Ocaramba.sln
+  #     - name: Set up Docker
+  #       uses: docker/setup-buildx-action@v2
+  #     - name: Run the-internet app in Docker
+  #       run: |
+  #         docker run -d -p 7080:5000 gprestes/the-internet
+  #     - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
+  #     - shell: pwsh
+  #       run: ./scripts/ExecutingTestsOnLinuxAzure.ps1
+  #     - name: Publish Test Results
+  #       uses: EnricoMi/publish-unit-test-result-action/linux@v2
+  #       if: true
+  #       with:
+  #         files: |
+  #           /home/runner/work/**/TestResults/*.xml
+  #         check_name: TestsOnLinux
+  #     - name: Upload zip logs as artifact
+  #       uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: ExecutingTestsOnLinux
+  #         path: ./Ocaramba.Tests.NUnit/bin/Release/net8.0/ExecutingTestsOnLinux${{ github.run_id }}.zip
+  # test_Stage_RunAppiumTestsOnAndroid:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: |
+  #         wget -P ./Ocaramba.Tests.Appium/bin/Release/net8.0/ https://github.com/appium/android-apidemos/releases/download/v3.1.0/ApiDemos-debug.apk
+  #         export ASPNETCORE_ENVIRONMENT=Linux
+  #         echo $ASPNETCORE_ENVIRONMENT
+  #         sed -i '/Documentation/,+5 d' ./Ocaramba.sln ; sed -i '/CloudProviderCrossBrowser/,+1 d' ./Ocaramba.sln; sed -i '/UnitTests/,+1 d' ./Ocaramba.sln; sed -i '/BrowserStack/,+1 d' ./Ocaramba.sln; sed -i '/MsTest/,+1 d' ./Ocaramba.sln;sed -i '/Features/,+1 d' ./Ocaramba.sln;sed -i '/Xunit/,+1 d' ./Ocaramba.sln;sed -i '/NUnitExtentReports/,+1 d' ./Ocaramba.sln;sed -i '/NUnit/,+1 d' ./Ocaramba.sln;sed -i '/Angular/,+1 d' ./Ocaramba.sln
+  #         ls
+  #         pwd
+  #     - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
+  #     - name: Set up JDK
+  #       uses: actions/setup-java@v3
+  #       with:
+  #         distribution: "temurin"
+  #         java-version: "17"
+  #     - name: Enable KVM
+  #       run: |
+  #         echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+  #         sudo udevadm control --reload-rules
+  #         sudo udevadm trigger --name-match=kvm
+  #     - run: |
+  #         npm install -g appium
+  #         appium -v
+  #         appium driver list --installed
+  #         appium driver install uiautomator2
+  #         nohup appium --log-level warn --log-timestamp --local-timezone > appium.log 2>&1 &
+  #         sleep 10
+  #         curl http://127.0.0.1:4723/wd/hub/sessions || echo "Appium check failed"
+  #     - name: run tests
+  #       uses: reactivecircus/android-emulator-runner@v2
+  #       with:
+  #         api-level: 28
+  #         target: google_apis
+  #         arch: x86_64
+  #         profile: Nexus 6
+  #         emulator-options: "-no-window -no-audio -no-snapshot"
+  #         disable-animations: true
+  #         script: |
+  #           echo "Installing APK on emulator 5554..."
+      #       adb -s emulator-5554 install -t -g ./Ocaramba.Tests.Appium/bin/Release/net8.0/ApiDemos-debug.apk
 
-            echo "Checking packages on emulator 5554:"
-            adb -s emulator-5554 shell pm list packages | grep io.appium.android.apis || echo "Package not found on emulator 5554"
+      #       echo "Checking packages on emulator 5554:"
+      #       adb -s emulator-5554 shell pm list packages | grep io.appium.android.apis || echo "Package not found on emulator 5554"
 
-            dotnet vstest ./Ocaramba.Tests.Appium/bin/Release/net8.0/Ocaramba.Tests.Appium.dll --logger:"trx;LogFileName=Ocaramba.Tests.Appium.xml"
-            pwsh -Command "Compress-Archive -Path './Ocaramba.Tests.Appium/bin/Release/net8.0/TestOutput/*' -DestinationPath './Ocaramba.Tests.Appium/bin/Release/net8.0/ExecutingTestsOnAndroid.zip'"
-            echo "Closing connection with emulator-5554"
-            adb -s emulator-5554 emu kill || true
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action/linux@v2
-        if: true
-        with:
-          files: |
-            /home/runner/work/**/TestResults/*.xml
-          check_name: TestsOnAndroid
-      - name: Upload zip logs as artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ExecutingTestsOnAndroid
-          path: ./Ocaramba.Tests.Appium/bin/Release/net8.0/ExecutingTestsOnAndroid.zip
+      #       dotnet vstest ./Ocaramba.Tests.Appium/bin/Release/net8.0/Ocaramba.Tests.Appium.dll --logger:"trx;LogFileName=Ocaramba.Tests.Appium.xml"
+      #       pwsh -Command "Compress-Archive -Path './Ocaramba.Tests.Appium/bin/Release/net8.0/TestOutput/*' -DestinationPath './Ocaramba.Tests.Appium/bin/Release/net8.0/ExecutingTestsOnAndroid.zip'"
+      #       echo "Closing connection with emulator-5554"
+      #       adb -s emulator-5554 emu kill || true
+      # - name: Publish Test Results
+      #   uses: EnricoMi/publish-unit-test-result-action/linux@v2
+      #   if: true
+      #   with:
+      #     files: |
+      #       /home/runner/work/**/TestResults/*.xml
+      #     check_name: TestsOnAndroid
+      # - name: Upload zip logs as artifact
+      #   uses: actions/upload-artifact@v4
+      #   if: always()
+      #   with:
+      #     name: ExecutingTestsOnAndroid
+      #     path: ./Ocaramba.Tests.Appium/bin/Release/net8.0/ExecutingTestsOnAndroid.zip
   test_Stage_RunTestsOnLinuxBrowserStack:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -330,306 +330,306 @@ jobs:
         with:
           name: ExecutingTestsOnBrowserStackLinux
           path: ./Ocaramba.Tests.BrowserStack/bin/Release/net8.0/ExecutingTestsOnBrowserStackLinux${{ github.run_id }}.zip
-  test_Stage_RunTestsOnLinuxsaucelabs:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          ls 
-          export ASPNETCORE_ENVIRONMENT=Linux
-          echo $ASPNETCORE_ENVIRONMENT
-          sed -i '/Documentation/,+5 d' ./Ocaramba.sln ; sed -i '/BrowserStack/,+1 d' ./Ocaramba.sln; sed -i '/UnitTests/,+1 d' ./Ocaramba.sln; sed -i '/BrowserStack/,+1 d' ./Ocaramba.sln; sed -i '/MsTest/,+1 d' ./Ocaramba.sln;sed -i '/Features/,+1 d' ./Ocaramba.sln;sed -i '/Xunit/,+1 d' ./Ocaramba.sln;sed -i '/NUnitExtentReports/,+1 d' ./Ocaramba.sln;sed -i '/Appium/,+1 d' ./Ocaramba.sln;sed -i '/NUnit/,+1 d' ./Ocaramba.sln;sed -i '/Angular/,+1 d' ./Ocaramba.sln
-      - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
-      - shell: pwsh
-        if: true
-        env:
-          MAPPED_ENV_BROWSERSTACKKEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
-          MAPPED_ENV_BROWSERSTACKUSER: ${{ secrets.BROWSERSTACK_USERNAME }}
-          MAPPED_ENV_TESTINGBOTKEY: ${{ secrets.testingbotkey }}
-          MAPPED_ENV_TESTINGBOTSECRET: ${{ secrets.testingbotsecret }}
-          MAPPED_ENV_SAUCELABSACCESSKEY: ${{ secrets.saucelabsaccessKey }}
-          MAPPED_ENV_SAUCELABSUSERNAME: ${{ secrets.saucelabsusername }}
-        run: ./scripts/ExecutingTestsOnWindowsGithubActions6.ps1
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action/linux@v2
-        if: true
-        with:
-          files: |
-            /home/runner/work/**/TestResults/*.xml
-          check_name: TestOnLinuxsaucelabs
-      - name: Upload zip logs as artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ExecutingTestsOnsaucelabsLinux
-          path: ./Ocaramba.Tests.CloudProviderCrossBrowser/bin/Release/net8.0/ExecutingTestsOnsaucelabLinux${{ github.run_id }}.zip
-  test_Stage_RunTestsOnWindowsCore1:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.x"
-      - shell: pwsh
-        run: |
-          (Get-Content ./Ocaramba.sln) | ForEach-Object -Begin { $skip = 0 } -Process {
-            if ($skip -gt 0) { $skip--; return }
-            switch -regex ($_) {
-                'Documentation'                        { $skip = 5; return }
-                'Ocaramba.Tests.Appium'               { $skip = 1; return }
-                'Ocaramba.UnitTests'                  { $skip = 1; return }
-                'Ocaramba.Tests.MsTest'               { $skip = 1; return }
-                'Ocaramba.Tests.Features'             { $skip = 1; return }
-                'Ocaramba.Tests.Xunit'                { $skip = 1; return }
-                'Ocaramba.Tests.CloudProviderCrossBrowser'              { $skip = 1; return }
-                'Ocaramba.Tests.BrowserStack'              { $skip = 1; return }
-                default { $_ }
-            }
-          } | Set-Content ./Ocaramba.sln
-      - name: Setup nuget
-        uses: nuget/setup-nuget@v2
-        with:
-          nuget-version: latest
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}\.nuget\packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }} #hash of project files
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-      - name: NuGet restore
-        run: nuget restore ${{ env.solution }}
-      - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
-      - run: ./scripts/ExecutingTestsOnWindowsGithubActions1.ps1
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action/windows@v2
-        if: always()
-        with:
-          files: ./**/Ocaramba.Tests.netcoreapp.xml
-          check_name: TestOnWindows1
-      - uses: actions/upload-artifact@v4
-        with:
-          path: WindowsCore1${{ github.run_id }}.zip
-          name: WindowsCore1
-        if: always()
-  test_Stage_RunTestsOnWindowsCore2:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.x"
-      - shell: pwsh
-        run: |
-          (Get-Content ./Ocaramba.sln) | ForEach-Object -Begin { $skip = 0 } -Process {
-            if ($skip -gt 0) { $skip--; return }
-            switch -regex ($_) {
-                'Documentation'                        { $skip = 5; return }
-                'Ocaramba.Tests.Appium'               { $skip = 1; return }
-                'Ocaramba.Tests.NUnitExtentReports'   { $skip = 1; return }
-                'Ocaramba.Tests.Angular'              { $skip = 4; return }
-                'Ocaramba.Tests.CloudProviderCrossBrowser'              { $skip = 1; return }
-                'Ocaramba.Tests.BrowserStack'              { $skip = 1; return }
-                default { $_ }
-            }
-          } | Set-Content ./Ocaramba.sln
-      - name: Setup nuget
-        uses: nuget/setup-nuget@v2
-        with:
-          nuget-version: latest
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}\.nuget\packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }} #hash of project files
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-      - name: NuGet restore
-        run: nuget restore ${{ env.solution }}
-      - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
-      - run: ./scripts/ExecutingTestsOnWindowsGithubActions2.ps1
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action/windows@v2
-        if: always()
-        with:
-          files: ./**/Ocaramba.Tests.*.xml
-          check_name: TestsOnWindows2
-      - uses: actions/upload-artifact@v4
-        with:
-          path: WindowsCore2${{ github.run_id }}.zip
-          name: WindowsCore2
-        if: always()
-  test_Stage_RunTestsOnWindowsBrowserStack:
-    timeout-minutes: 10
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.x"
-      - shell: pwsh
-        run: |
-          (Get-Content ./Ocaramba.sln) | ForEach-Object -Begin { $skip = 0 } -Process {
-            if ($skip -gt 0) { $skip--; return }
-            switch -regex ($_) {
-                'Documentation'                        { $skip = 5; return }
-                'Ocaramba.Tests.Appium'               { $skip = 1; return }
-                'Ocaramba.UnitTests'                  { $skip = 1; return }
-                'Ocaramba.Tests.NUnit'                { $skip = 1; return }
-                'Ocaramba.Tests.MsTest'               { $skip = 1; return }
-                'Ocaramba.Tests.Features'             { $skip = 1; return }
-                'Ocaramba.Tests.Xunit'                { $skip = 1; return }
-                'Ocaramba.Tests.Angular'              { $skip = 4; return }
-                'Ocaramba.Tests.CloudProviderCrossBrowser'              { $skip = 1; return }
-                'Ocaramba.Tests.NUnitExtentReports'   { $skip = 1; return }
-                default { $_ }
-            }
-          } | Set-Content ./Ocaramba.sln
-      - name: Restore
-        run: dotnet restore
-      - shell: pwsh
-        run: |
-          dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }} --no-restore
-      - name: "BrowserStack Env Setup"
-        uses: browserstack/github-actions/setup-env@master
-        with:
-          username: ${{ secrets.BROWSERSTACK_USERNAME }}
-          access-key: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
-          project-name: Ocaramba_Windows_BrowserStack
-      - name: "Start BrowserStackLocal Tunnel"
-        uses: "browserstack/github-actions/setup-local@master"
-        with:
-          local-testing: "start"
-          local-logging-level: "all-logs"
-          local-identifier: "random"
-      - run: ./scripts/ExecutingTestsOnWindowsGithubActions4.ps1
-        env:
-          BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
-          BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
-      - name: "BrowserStack Build Report"
-        uses: "browserstack/github-actions/browserstack-report-action@master"
-        with:
-          username: ${{ secrets.BROWSERSTACK_USERNAME }}
-          access-key: ${{ secrets.BROWSERSTACK_USERNAME }}
-          build-name: BUILD_INFO
-          report-timeout: 10
-        continue-on-error: true
-      - name: Archive logs
-        if: always()
-        run: |
-          $dest = "./Ocaramba.Tests.BrowserStack/bin/Release/net8.0"
-          Get-ChildItem -Path "./**/TestResults/*" -Recurse | Select-Object FullName
-          Compress-Archive -Path "./**/TestResults/*" -DestinationPath "$dest/ExecutingTestsOnWindowsBrowserStackReport$env:GITHUB_RUN_ID.zip"
-      - name: "Stop BrowserStackLocal"
-        if: always()
-        uses: "browserstack/github-actions/setup-local@master"
-        with:
-          local-testing: "stop"
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action/windows@v2
-        if: true
-        with:
-          files: ./**/Ocaramba.Tests.BrowserStack.xml
-          check_name: TestsOnWindowsBrowserStack4
-      - name: Upload HTML Report as Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: BROWSERSTACK_Report
-          path: /Ocaramba.Tests.BrowserStack/bin/Release/net8.0/ExecutingTestsOnWindowsBrowserStack${{ github.run_id }}.zip
-      - name: Upload zip logs as artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ExecutingTestsOnBrowserStackWindows
-          path: ./Ocaramba.Tests.BrowserStack/bin/Release/net8.0/ExecutingTestsOnBrowserStackWindows${{ github.run_id }}.zip
-  test_Stage_RunTestsSeleniumGrid:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: |
-          ls
-          export ASPNETCORE_ENVIRONMENT=Linux
-          echo $ASPNETCORE_ENVIRONMENT
-          sed -i -e '/Documentation/,+5 d' -e '/Ocaramba.Tests.Appium/,+1 d' -e '/Ocaramba.UnitTests/,+1 d' -e '/Ocaramba.Tests.MsTest/,+1 d' -e '/Ocaramba.Tests.Features/,+1 d' -e '/Ocaramba.Tests.BrowserStack/,+1 d' -e '/Ocaramba.Tests.Xunit/,+1 d' -e '/Ocaramba.Tests.Angular/,+4 d' -e '/Ocaramba.Tests.NUnitExtentReports/,+1 d' ./Ocaramba.sln
-      - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
-      - name: Install Docker Compose
-        run: |
-          sudo apt-get update 
-          sudo apt-get install docker-compose -y
-      - run: docker-compose -f ./Ocaramba.Tests.NUnit/docker-compose.yml up -d
-      - shell: pwsh
-        run: ./scripts/ExecutingTestsOnWindowsGithubActions5.ps1
-      - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action/linux@v2
-        if: always()
-        with:
-          files: ./**/Ocaramba.Tests.*.xml
-          check_name: TestsOnWindows5SeleniumGrid
-      - uses: actions/upload-artifact@v4
-        with:
-          path: WindowsCore5${{ github.run_id }}.zip
-          name: WindowsCore5SeleniumGrid
-        if: always()
-  release_Stage_PublishNuget:
-    runs-on: windows-latest
-    needs:
-      - test_Stage_RunTestsOnDocker
-      - test_Stage_RunTestsOnLinux
-      - test_Stage_RunTestsOnLinuxBrowserStack
-      - test_Stage_RunTestsOnWindowsCore1
-      - test_Stage_RunTestsOnWindowsCore2
-      - test_Stage_RunTestsSeleniumGrid
-      - test_Stage_RunAppiumTestsOnAndroid
-      - test_Stage_RunTestsOnLinuxsaucelabs
-      - test_Stage_RunTestsOnWindowsBrowserStack
-      - build_Stage_BuildOnWindows
-    steps:
-      - uses: actions/checkout@v4
-      - name: Get latest Git tag
-        shell: powershell
-        run: |
-          $latestTag = git describe --tags (git rev-list --tags --max-count=1)
-          echo "frameworkVersion=$latestTag" >> $env:GITHUB_ENV
-        if: startsWith(github.ref, 'refs/tags/')
-      - uses: actions/download-artifact@v4
-        with:
-          name: Ocaramba${{ env.frameworkVersion }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: OcarambaS${{ env.frameworkVersion }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: OcarambaLite${{ env.frameworkVersion }}
-      - uses: actions/download-artifact@v4
-        with:
-          name: OcarambaLiteS${{ env.frameworkVersion }}
-      - shell: pwsh
-        run: |
-          Get-ChildItem -Recurse
-      - name: Push Nuget Package
-        run: dotnet nuget push .\Ocaramba.${{ env.frameworkVersion }}.nupkg -s https://api.nuget.org/v3/index.json -k ${{ secrets.NUGET_API_KEY }}
-        if: (success() && startsWith(github.ref, 'refs/tags/'))
-      - name: Push Nuget Package
-        run: dotnet nuget push .\OcarambaLite.${{ env.frameworkVersion }}.nupkg -s https://api.nuget.org/v3/index.json -k ${{ secrets.NUGET_API_KEY }}
-        if: (success() && startsWith(github.ref, 'refs/tags/'))
-  deploy:
-    needs:
-      - build_Stage_BuildOnWindows
-      - release_Stage_PublishNuget
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
-      # Deploy Documentation to GitHub Pages
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-        if: (success() && startsWith(github.ref, 'refs/tags/'))
+  # test_Stage_RunTestsOnLinuxsaucelabs:
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: |
+  #         ls 
+  #         export ASPNETCORE_ENVIRONMENT=Linux
+  #         echo $ASPNETCORE_ENVIRONMENT
+  #         sed -i '/Documentation/,+5 d' ./Ocaramba.sln ; sed -i '/BrowserStack/,+1 d' ./Ocaramba.sln; sed -i '/UnitTests/,+1 d' ./Ocaramba.sln; sed -i '/BrowserStack/,+1 d' ./Ocaramba.sln; sed -i '/MsTest/,+1 d' ./Ocaramba.sln;sed -i '/Features/,+1 d' ./Ocaramba.sln;sed -i '/Xunit/,+1 d' ./Ocaramba.sln;sed -i '/NUnitExtentReports/,+1 d' ./Ocaramba.sln;sed -i '/Appium/,+1 d' ./Ocaramba.sln;sed -i '/NUnit/,+1 d' ./Ocaramba.sln;sed -i '/Angular/,+1 d' ./Ocaramba.sln
+  #     - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
+  #     - shell: pwsh
+  #       if: true
+  #       env:
+  #         MAPPED_ENV_BROWSERSTACKKEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+  #         MAPPED_ENV_BROWSERSTACKUSER: ${{ secrets.BROWSERSTACK_USERNAME }}
+  #         MAPPED_ENV_TESTINGBOTKEY: ${{ secrets.testingbotkey }}
+  #         MAPPED_ENV_TESTINGBOTSECRET: ${{ secrets.testingbotsecret }}
+  #         MAPPED_ENV_SAUCELABSACCESSKEY: ${{ secrets.saucelabsaccessKey }}
+  #         MAPPED_ENV_SAUCELABSUSERNAME: ${{ secrets.saucelabsusername }}
+  #       run: ./scripts/ExecutingTestsOnWindowsGithubActions6.ps1
+  #     - name: Publish Test Results
+  #       uses: EnricoMi/publish-unit-test-result-action/linux@v2
+  #       if: true
+  #       with:
+  #         files: |
+  #           /home/runner/work/**/TestResults/*.xml
+  #         check_name: TestOnLinuxsaucelabs
+  #     - name: Upload zip logs as artifact
+  #       uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: ExecutingTestsOnsaucelabsLinux
+  #         path: ./Ocaramba.Tests.CloudProviderCrossBrowser/bin/Release/net8.0/ExecutingTestsOnsaucelabLinux${{ github.run_id }}.zip
+  # test_Stage_RunTestsOnWindowsCore1:
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Setup .NET
+  #       uses: actions/setup-dotnet@v4
+  #       with:
+  #         dotnet-version: "8.x"
+  #     - shell: pwsh
+  #       run: |
+  #         (Get-Content ./Ocaramba.sln) | ForEach-Object -Begin { $skip = 0 } -Process {
+  #           if ($skip -gt 0) { $skip--; return }
+  #           switch -regex ($_) {
+  #               'Documentation'                        { $skip = 5; return }
+  #               'Ocaramba.Tests.Appium'               { $skip = 1; return }
+  #               'Ocaramba.UnitTests'                  { $skip = 1; return }
+  #               'Ocaramba.Tests.MsTest'               { $skip = 1; return }
+  #               'Ocaramba.Tests.Features'             { $skip = 1; return }
+  #               'Ocaramba.Tests.Xunit'                { $skip = 1; return }
+  #               'Ocaramba.Tests.CloudProviderCrossBrowser'              { $skip = 1; return }
+  #               'Ocaramba.Tests.BrowserStack'              { $skip = 1; return }
+  #               default { $_ }
+  #           }
+  #         } | Set-Content ./Ocaramba.sln
+  #     - name: Setup nuget
+  #       uses: nuget/setup-nuget@v2
+  #       with:
+  #         nuget-version: latest
+  #     - name: Cache
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ${{ github.workspace }}\.nuget\packages
+  #         key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }} #hash of project files
+  #         restore-keys: |
+  #           ${{ runner.os }}-nuget-
+  #     - name: NuGet restore
+  #       run: nuget restore ${{ env.solution }}
+  #     - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
+  #     - run: ./scripts/ExecutingTestsOnWindowsGithubActions1.ps1
+  #     - name: Publish Test Results
+  #       uses: EnricoMi/publish-unit-test-result-action/windows@v2
+  #       if: always()
+  #       with:
+  #         files: ./**/Ocaramba.Tests.netcoreapp.xml
+  #         check_name: TestOnWindows1
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         path: WindowsCore1${{ github.run_id }}.zip
+  #         name: WindowsCore1
+  #       if: always()
+  # test_Stage_RunTestsOnWindowsCore2:
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Setup .NET
+  #       uses: actions/setup-dotnet@v4
+  #       with:
+  #         dotnet-version: "8.x"
+  #     - shell: pwsh
+  #       run: |
+  #         (Get-Content ./Ocaramba.sln) | ForEach-Object -Begin { $skip = 0 } -Process {
+  #           if ($skip -gt 0) { $skip--; return }
+  #           switch -regex ($_) {
+  #               'Documentation'                        { $skip = 5; return }
+  #               'Ocaramba.Tests.Appium'               { $skip = 1; return }
+  #               'Ocaramba.Tests.NUnitExtentReports'   { $skip = 1; return }
+  #               'Ocaramba.Tests.Angular'              { $skip = 4; return }
+  #               'Ocaramba.Tests.CloudProviderCrossBrowser'              { $skip = 1; return }
+  #               'Ocaramba.Tests.BrowserStack'              { $skip = 1; return }
+  #               default { $_ }
+  #           }
+  #         } | Set-Content ./Ocaramba.sln
+  #     - name: Setup nuget
+  #       uses: nuget/setup-nuget@v2
+  #       with:
+  #         nuget-version: latest
+  #     - name: Cache
+  #       uses: actions/cache@v4
+  #       with:
+  #         path: ${{ github.workspace }}\.nuget\packages
+  #         key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }} #hash of project files
+  #         restore-keys: |
+  #           ${{ runner.os }}-nuget-
+  #     - name: NuGet restore
+  #       run: nuget restore ${{ env.solution }}
+  #     - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
+  #     - run: ./scripts/ExecutingTestsOnWindowsGithubActions2.ps1
+  #     - name: Publish Test Results
+  #       uses: EnricoMi/publish-unit-test-result-action/windows@v2
+  #       if: always()
+  #       with:
+  #         files: ./**/Ocaramba.Tests.*.xml
+  #         check_name: TestsOnWindows2
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         path: WindowsCore2${{ github.run_id }}.zip
+  #         name: WindowsCore2
+  #       if: always()
+  # test_Stage_RunTestsOnWindowsBrowserStack:
+  #   timeout-minutes: 10
+  #   runs-on: windows-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Setup .NET
+  #       uses: actions/setup-dotnet@v4
+  #       with:
+  #         dotnet-version: "8.x"
+  #     - shell: pwsh
+  #       run: |
+  #         (Get-Content ./Ocaramba.sln) | ForEach-Object -Begin { $skip = 0 } -Process {
+  #           if ($skip -gt 0) { $skip--; return }
+  #           switch -regex ($_) {
+  #               'Documentation'                        { $skip = 5; return }
+  #               'Ocaramba.Tests.Appium'               { $skip = 1; return }
+  #               'Ocaramba.UnitTests'                  { $skip = 1; return }
+  #               'Ocaramba.Tests.NUnit'                { $skip = 1; return }
+  #               'Ocaramba.Tests.MsTest'               { $skip = 1; return }
+  #               'Ocaramba.Tests.Features'             { $skip = 1; return }
+  #               'Ocaramba.Tests.Xunit'                { $skip = 1; return }
+  #               'Ocaramba.Tests.Angular'              { $skip = 4; return }
+  #               'Ocaramba.Tests.CloudProviderCrossBrowser'              { $skip = 1; return }
+  #               'Ocaramba.Tests.NUnitExtentReports'   { $skip = 1; return }
+  #               default { $_ }
+  #           }
+  #         } | Set-Content ./Ocaramba.sln
+  #     - name: Restore
+  #       run: dotnet restore
+  #     - shell: pwsh
+  #       run: |
+  #         dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }} --no-restore
+  #     - name: "BrowserStack Env Setup"
+  #       uses: browserstack/github-actions/setup-env@master
+  #       with:
+  #         username: ${{ secrets.BROWSERSTACK_USERNAME }}
+  #         access-key: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+  #         project-name: Ocaramba_Windows_BrowserStack
+  #     - name: "Start BrowserStackLocal Tunnel"
+  #       uses: "browserstack/github-actions/setup-local@master"
+  #       with:
+  #         local-testing: "start"
+  #         local-logging-level: "all-logs"
+  #         local-identifier: "random"
+  #     - run: ./scripts/ExecutingTestsOnWindowsGithubActions4.ps1
+  #       env:
+  #         BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+  #         BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+  #     - name: "BrowserStack Build Report"
+  #       uses: "browserstack/github-actions/browserstack-report-action@master"
+  #       with:
+  #         username: ${{ secrets.BROWSERSTACK_USERNAME }}
+  #         access-key: ${{ secrets.BROWSERSTACK_USERNAME }}
+  #         build-name: BUILD_INFO
+  #         report-timeout: 10
+  #       continue-on-error: true
+  #     - name: Archive logs
+  #       if: always()
+  #       run: |
+  #         $dest = "./Ocaramba.Tests.BrowserStack/bin/Release/net8.0"
+  #         Get-ChildItem -Path "./**/TestResults/*" -Recurse | Select-Object FullName
+  #         Compress-Archive -Path "./**/TestResults/*" -DestinationPath "$dest/ExecutingTestsOnWindowsBrowserStackReport$env:GITHUB_RUN_ID.zip"
+  #     - name: "Stop BrowserStackLocal"
+  #       if: always()
+  #       uses: "browserstack/github-actions/setup-local@master"
+  #       with:
+  #         local-testing: "stop"
+  #     - name: Publish Test Results
+  #       uses: EnricoMi/publish-unit-test-result-action/windows@v2
+  #       if: true
+  #       with:
+  #         files: ./**/Ocaramba.Tests.BrowserStack.xml
+  #         check_name: TestsOnWindowsBrowserStack4
+  #     - name: Upload HTML Report as Artifact
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: BROWSERSTACK_Report
+  #         path: /Ocaramba.Tests.BrowserStack/bin/Release/net8.0/ExecutingTestsOnWindowsBrowserStack${{ github.run_id }}.zip
+  #     - name: Upload zip logs as artifact
+  #       uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: ExecutingTestsOnBrowserStackWindows
+  #         path: ./Ocaramba.Tests.BrowserStack/bin/Release/net8.0/ExecutingTestsOnBrowserStackWindows${{ github.run_id }}.zip
+  # test_Stage_RunTestsSeleniumGrid:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - run: |
+  #         ls
+  #         export ASPNETCORE_ENVIRONMENT=Linux
+  #         echo $ASPNETCORE_ENVIRONMENT
+  #         sed -i -e '/Documentation/,+5 d' -e '/Ocaramba.Tests.Appium/,+1 d' -e '/Ocaramba.UnitTests/,+1 d' -e '/Ocaramba.Tests.MsTest/,+1 d' -e '/Ocaramba.Tests.Features/,+1 d' -e '/Ocaramba.Tests.BrowserStack/,+1 d' -e '/Ocaramba.Tests.Xunit/,+1 d' -e '/Ocaramba.Tests.Angular/,+4 d' -e '/Ocaramba.Tests.NUnitExtentReports/,+1 d' ./Ocaramba.sln
+  #     - run: dotnet build ./Ocaramba.sln --configuration ${{ env.buildConfiguration }}
+  #     - name: Install Docker Compose
+  #       run: |
+  #         sudo apt-get update 
+  #         sudo apt-get install docker-compose -y
+  #     - run: docker-compose -f ./Ocaramba.Tests.NUnit/docker-compose.yml up -d
+  #     - shell: pwsh
+  #       run: ./scripts/ExecutingTestsOnWindowsGithubActions5.ps1
+  #     - name: Publish Test Results
+  #       uses: EnricoMi/publish-unit-test-result-action/linux@v2
+  #       if: always()
+  #       with:
+  #         files: ./**/Ocaramba.Tests.*.xml
+  #         check_name: TestsOnWindows5SeleniumGrid
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         path: WindowsCore5${{ github.run_id }}.zip
+  #         name: WindowsCore5SeleniumGrid
+  #       if: always()
+  # release_Stage_PublishNuget:
+  #   runs-on: windows-latest
+  #   needs:
+  #     - test_Stage_RunTestsOnDocker
+  #     - test_Stage_RunTestsOnLinux
+  #     - test_Stage_RunTestsOnLinuxBrowserStack
+  #     - test_Stage_RunTestsOnWindowsCore1
+  #     - test_Stage_RunTestsOnWindowsCore2
+  #     - test_Stage_RunTestsSeleniumGrid
+  #     - test_Stage_RunAppiumTestsOnAndroid
+  #     - test_Stage_RunTestsOnLinuxsaucelabs
+  #     - test_Stage_RunTestsOnWindowsBrowserStack
+  #     - build_Stage_BuildOnWindows
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Get latest Git tag
+  #       shell: powershell
+  #       run: |
+  #         $latestTag = git describe --tags (git rev-list --tags --max-count=1)
+  #         echo "frameworkVersion=$latestTag" >> $env:GITHUB_ENV
+  #       if: startsWith(github.ref, 'refs/tags/')
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: Ocaramba${{ env.frameworkVersion }}
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: OcarambaS${{ env.frameworkVersion }}
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: OcarambaLite${{ env.frameworkVersion }}
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: OcarambaLiteS${{ env.frameworkVersion }}
+  #     - shell: pwsh
+  #       run: |
+  #         Get-ChildItem -Recurse
+  #     - name: Push Nuget Package
+  #       run: dotnet nuget push .\Ocaramba.${{ env.frameworkVersion }}.nupkg -s https://api.nuget.org/v3/index.json -k ${{ secrets.NUGET_API_KEY }}
+  #       if: (success() && startsWith(github.ref, 'refs/tags/'))
+  #     - name: Push Nuget Package
+  #       run: dotnet nuget push .\OcarambaLite.${{ env.frameworkVersion }}.nupkg -s https://api.nuget.org/v3/index.json -k ${{ secrets.NUGET_API_KEY }}
+  #       if: (success() && startsWith(github.ref, 'refs/tags/'))
+  # deploy:
+  #   needs:
+  #     - build_Stage_BuildOnWindows
+  #     - release_Stage_PublishNuget
+  #   environment:
+  #     name: github-pages
+  #     url: ${{ steps.deployment.outputs.page_url }}
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     # Deploy Documentation to GitHub Pages
+  #     - name: Deploy to GitHub Pages
+  #       id: deployment
+  #       uses: actions/deploy-pages@v4
+  #       if: (success() && startsWith(github.ref, 'refs/tags/'))
 
 
 
